@@ -1,0 +1,51 @@
+# 生产配置：Flink 1.19 + Kafka + Iceberg（本地验证不依赖这些）
+#
+# 本地验证用 streamforge/job.py 的等价实现，见 README。
+
+job:
+  name: streamforge-ingest
+  parallelism: 4
+  checkpoint:
+    interval_ms: 60000
+    mode: at-least-once
+    min_pause_ms: 30000
+    timeout_ms: 600000
+
+  restart:
+    strategy: fixed-delay
+    attempts: 3
+    delay_ms: 10000
+
+source:
+  kafka:
+    bootstrap_servers: kafka:9092
+    topics:
+      events: order_events
+      dim: dim_shop
+    group_id: streamforge
+    starting_offsets: committed
+
+watermark:
+  timestamp_field: ingest_time
+  out_of_orderness_seconds: 300
+
+sink:
+  iceberg:
+    catalog: local
+    warehouse: s3a://lake/_warehouse
+    table: dwd.order_events
+    write:
+      distribution_mode: hash
+      target_file_size_bytes: 134217728
+      two_phase_commit: false
+
+state:
+  ttl_hours: 0
+
+side_output:
+  late_events:
+    path: s3a://lake/side/late_events
+    format: jsonl
+
+dim:
+  reload_strategy: full-overwrite

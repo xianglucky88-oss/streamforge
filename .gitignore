@@ -1,0 +1,113 @@
+# ============================================================
+# 内部出题资料（缺陷清单等，绝不进仓库）
+# ============================================================
+.internal/
+*known-issues*
+docs/internal/
+
+# ============================================================
+# 凭据与敏感配置（文档硬性要求：.env / 密钥 / 连接串 / token）
+# ============================================================
+.env
+.env.*
+!.env.example
+*.env.local
+*.env.production
+
+# 私钥与证书
+*.key
+*.pem
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.crt
+*.cer
+ssh/
+id_rsa*
+id_ed25519*
+
+# 凭据文件
+secrets/
+credentials*
+*credentials.json
+.netrc
+.pgpass
+.pg_service.conf
+.my.cnf
+.npmrc
+.pypirc
+.docker/config.json
+
+# 连接串与 token
+*connection.string
+*conn.txt
+*.token
+*token.txt
+*.secret
+
+# 云与基础设施状态
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+
+# Kubernetes
+kubeconfig
+*.kubeconfig
+*.kubeconfig.yaml
+
+# ============================================================
+# Python
+# ============================================================
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+*.egg-info/
+.venv/
+venv/
+env/
+
+# ============================================================
+# Scala / JVM 构建产物
+# ============================================================
+target/
+project/target/
+project/project/
+.bsp/
+.scala-build/
+.bloop/
+.metals/
+.ivy2/
+.coursier/
+*.class
+*.jar
+!flinkjob/**/*.jar
+
+# ============================================================
+# 运行数据与本地状态
+# ============================================================
+warehouse/
+data/
+tmp/
+logs/
+*.log
+*.pid
+*.parquet
+
+# ============================================================
+# 编辑器与系统
+# ============================================================
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+desktop.ini
