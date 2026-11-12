@@ -16,7 +16,7 @@
 几个关键行为都在 `Job._consume` 与 `Job._checkpoint` 里：
     * 默认用 processing time（#2）→ 迟到数据被静默丢弃
     * 2PC 默认关闭（#1）→ 作业重启后重复写入
-    * 维表 reload 是全量覆盖（#3）→ reload 瞬间有短暂空窗
+    * 维表 reload 采用全量覆盖
     * 每批次一个文件（#4）→ 小文件爆炸
 """
 
@@ -70,7 +70,7 @@ class DimState:
     """维表状态。
 
     真实 Flink 里这是一个被广播的 MapState。这里的实现复刻了"全量 reload"的行为：
-    reload 时先清空、再逐条写入，因此 reload 过程中存在短暂的空窗期。
+    reload 时先清空、再逐条写入。
     """
 
     rows: dict[str, dict] = field(default_factory=dict)

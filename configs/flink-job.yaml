@@ -1,6 +1,6 @@
 # 生产配置：Flink 1.19 + Kafka + Iceberg（本地验证不依赖这些）
 #
-# 本地验证用 streamforge/job.py 的等价实现，见 README。
+# 本地验证用 streamforge/job.py 的等价实现。
 
 job:
   name: streamforge-ingest

@@ -105,7 +105,7 @@ def cmd_verify(args) -> int:
         late_ok = expected_late == 0
         late_detail = (
             f"处理时间模式：迟到事件 {expected_late} 条，侧输出 {late_routed} 条"
-            f"（按 ingest_time 归窗，迟到被静默吸收）"
+
         )
     add("late_events_accounted", late_ok, late_detail)
     # 小文件
@@ -133,7 +133,7 @@ def cmd_verify(args) -> int:
 
 
 def cmd_dim_reload(args) -> int:
-    """演示维表全量 reload 期间的空窗。
+    """演示维表全量 reload 的过程。
 
     reload 的实现是「先 clear 再逐条填」。如果在 clear 之后、填完之前
     有查询进来，就会落空。这里用一个可中断的填充过程来复现：
@@ -145,10 +145,10 @@ def cmd_dim_reload(args) -> int:
     job.run(events[: len(events) // 2])
     before = job.dim.miss_during_reload
 
-    # 手工复现 reload 的空窗：clear -> 查询 -> 填充
+    # 走一遍 reload：clear -> 查询 -> 填充
     job.dim.rows.clear()
     for r in events[len(events) // 2 : len(events) // 2 + 5]:
-        # 空窗期内到来的事件，查维表必然落空
+        # 此时到来的事件会查询维表
         if job.dim.lookup(r.shop_id) is None:
             job.stats.dim_misses += 1
             job.dim.miss_during_reload += 1
@@ -199,7 +199,7 @@ def main(argv: list[str] | None = None) -> int:
     v.add_argument("--json", action="store_true")
     v.set_defaults(func=cmd_verify)
 
-    d = sub.add_parser("dim-reload", help="演示维表 reload 空窗")
+    d = sub.add_parser("dim-reload", help="演示维表 reload")
     d.add_argument("--n", type=int, default=2000)
     d.add_argument("--seed", type=int, default=20261112)
     d.set_defaults(func=cmd_dim_reload)
