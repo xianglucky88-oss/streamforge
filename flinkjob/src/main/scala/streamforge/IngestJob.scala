@@ -8,9 +8,10 @@
 //   Job._consume                    KeyedProcessFunction / ProcessFunction
 //   Watermarks                      BoundedOutOfOrdernessWatermarks
 //   late_sink                       OutputTag[OrderEvent]("late")
-//   DimState.reload 全量 reload       BroadcastProcessFunction + 全量状态覆盖
+//   DimTable 双缓冲原子切换           EnrichWithVersionedDim + 广播状态"代"隔离
 //   Sink 2PC                        FlinkKafkaProducer / Iceberg 的 2PC commit
 //   checkpoint_interval              env.enableCheckpointing
+//   row.dim_version                  OrderRow.dimVersion / dimDigest
 //
 // 生产配置与本地模拟器共享同一套语义。
 //
@@ -19,12 +20,9 @@
 package streamforge
 
 import org.apache.flink.api.common.eventtime.{SerializableTimestampAssigner, WatermarkStrategy}
-import org.apache.flink.api.common.typeinfo.TypeInformation
 import org.apache.flink.streaming.api.CheckpointingMode
 import org.apache.flink.streaming.api.datastream.{BroadcastStream, SingleOutputStreamOperator}
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment
-import org.apache.flink.streaming.api.functions.co.BroadcastProcessFunction
-import org.apache.flink.util.Collector
 
 import java.time.Duration
 
@@ -43,7 +41,7 @@ final case class OrderEvent(
 /** 维表行。 */
 final case class DimRow(shopId: String, shopName: String, region: String, tier: String)
 
-/** 落表行。 */
+/** 落表行。字段与 Python 版 job.py 的 row 对齐。 */
 final case class OrderRow(
     eventId: String,
     orderId: String,
@@ -55,7 +53,10 @@ final case class OrderRow(
     channel: String,
     eventTime: java.time.Instant,
     ingestTime: java.time.Instant,
-    windowDate: String
+    windowDate: String,
+    // 维度版本溯源：每条结果都能证明自己用的是哪份维表。
+    dimVersion: String,
+    dimDigest: String
 )
 
 object IngestJob {
@@ -88,19 +89,20 @@ object IngestJob {
           })
       )
 
-    // 维表流：Kafka JSON -> DimRow，然后广播
-    val dimStream: BroadcastStream[DimRow] =
+    // 维表流：Kafka JSON -> DimMessage（含快照结束标记），然后广播
+    val dimStream: BroadcastStream[DimMessage] =
       env.fromSource(
           KafkaSources.dimUpdates("dim_shop", "localhost:9092", "streamforge"),
           WatermarkStrategy.noWatermarks[String](),
           "dim-shop"
         )
-        .map(new JsonToDimRow)
-        .broadcast(DimDescriptors.dimState)
+        .map(new JsonToDimMessage)
+        .broadcast(DimStateDescriptors.rowsByGen, DimStateDescriptors.countByGen,
+          DimStateDescriptors.activeGen)
 
     val enriched: SingleOutputStreamOperator[OrderRow] = withTimestamps
       .connect(dimStream)
-      .process(new EnrichWithDim)
+      .process(new EnrichWithVersionedDim)
 
     // 侧输出：迟到事件。
     enriched
@@ -113,67 +115,9 @@ object IngestJob {
   }
 }
 
-/** 维表广播 + 事实流 join。
-  *
-  * 上游每 10 分钟推一次全量快照。
-  */
-final class EnrichWithDim extends BroadcastProcessFunction[OrderEvent, DimRow, OrderRow] {
-
-  override def processElement(
-      e: OrderEvent,
-      ctx: BroadcastProcessFunction[OrderEvent, DimRow, OrderRow]#ReadOnlyContext,
-      out: Collector[OrderRow]
-  ): Unit = {
-    val state = ctx.getBroadcastState(DimDescriptors.dimState)
-
-    // 迟到判定。
-    //
-    // 注意：BroadcastProcessFunction 的 ReadOnlyContext **没有** timerService()，
-    // 广播流本身不支持定时器（这是 Flink 的设计约束）。
-    // 因此真正的迟到判定必须放在 broadcast 之前的 keyed 算子里：
-    //   stream.keyBy(...).process(new LateFilter) 再 connect(broadcast)
-    //
-    // 当前实现把"迟到判定"挂在 broadcast 之后，拿不到 watermark，
-    // 因此这里的迟到判定恒为 false。
-
-    val dim: DimRow = if (state.contains(e.shopId)) state.get(e.shopId) else null
-    val name = if (dim == null) null else dim.shopName
-    val region = if (dim == null) null else dim.region
-
-    out.collect(
-      OrderRow(
-        eventId = e.eventId,
-        orderId = e.orderId,
-        shopId = e.shopId,
-        shopName = name,
-        region = region,
-        status = e.status,
-        amountCents = e.amountCents,
-        channel = e.channel,
-        eventTime = e.eventTime,
-        ingestTime = e.ingestTime,
-        // 窗口归属使用 ingestTime
-        windowDate = e.ingestTime.toString.take(10)
-      )
-    )
-  }
-
-  override def processBroadcastElement(
-      d: DimRow,
-      ctx: BroadcastProcessFunction[OrderEvent, DimRow, OrderRow]#Context,
-      out: Collector[OrderRow]
-  ): Unit = {
-    ctx.getBroadcastState(DimDescriptors.dimState).put(d.shopId, d)
-  }
-}
-
-object DimDescriptors {
-  import org.apache.flink.api.common.state.MapStateDescriptor
-
-  val dimState: MapStateDescriptor[String, DimRow] =
-    new MapStateDescriptor[String, DimRow](
-      "dim-shop",
-      TypeInformation.of(classOf[String]),
-      TypeInformation.of(classOf[DimRow])
-    )
-}
+// 维表广播 + 事实流 join 已改为版本化实现，见 DimVersioning.scala：
+//   EnrichWithVersionedDim 按"代"隔离快照，完整校验后原子切换 active gen。
+//
+// 迟到判定的注意点保持不变：BroadcastProcessFunction 的 ReadOnlyContext
+// **没有** timerService()/watermark，迟到过滤必须放在 connect(broadcast)
+// 之前的 keyed 算子里，否则恒为 false。

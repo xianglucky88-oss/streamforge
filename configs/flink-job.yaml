@@ -48,4 +48,13 @@ side_output:
     format: jsonl
 
 dim:
-  reload_strategy: full-overwrite
+  # 版本化全量快照：每条快照带 gen，结束标记校验行数/digest 后原子启用。
+  # 加载失败或校验不通过时保留旧版本继续服务。
+  reload_strategy: versioned-full-snapshot
+  version_state: dim-active-gen
+  # 内存预算：旧版本 + 候选版本之和不得超过；超出则拒绝发布新版本。
+  max_bytes: 536870912
+  # 保留版本数（2 = 活动版本 + 可回退的上一版本）。
+  retain_versions: 2
+  # 新版本快照构建期间，旧版本继续服务；不阻塞事件处理。
+  refresh_mode: background

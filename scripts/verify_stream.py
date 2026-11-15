@@ -64,16 +64,35 @@ def snapshot_with_side_output(job: Job, events: list) -> dict:
 def run_case(events, *, two_phase: bool, processing_time: bool, crash_at: int | None) -> dict:
     root = Path(tempfile.mkdtemp(prefix="sf-verify-"))
     mk = lambda: Job(  # noqa: E731
-        make_dim(), root=root, batch_size=200, two_phase=two_phase, processing_time=processing_time
+        make_dim(),
+        root=root,
+        batch_size=200,
+        two_phase=two_phase,
+        processing_time=processing_time,
+        checkpoint_interval=200,
     )
+    restore = None
+    checkpoint = None
+    resume_from = 0
     if crash_at is not None:
-        mk().run(events, crash_at=crash_at)
+        first = mk()
+        first.run(events, crash_at=crash_at)
+        checkpoint = first.latest_checkpoint()
+        first.close()
         job = mk()  # 模拟重启
-        job.run(events)
+        # 真实恢复：按检查点记录的 offset 继续消费，并按版本 id 对齐维表。
+        report = job.resume_from_checkpoint(events)
+        restore = report["dim_restore"]
+        resume_from = report["resume_from"]
     else:
         job = mk()
         job.run(events)
-    return snapshot_with_side_output(job, events)
+    snap = snapshot_with_side_output(job, events)
+    snap["dim_restore"] = restore
+    snap["checkpoint"] = checkpoint
+    snap["resume_from"] = resume_from
+    job.close()
+    return snap
 
 
 def main() -> int:
@@ -162,6 +181,40 @@ def main() -> int:
             f"  [FAIL] 合并后订单 {snap_et['merged_orders']} vs 真值 {len(gt)}"
         )
         ok = False
+
+    # 6. 所有场景：维表版本一致、逐行版本可证明
+    for name, snap, _kw in rows:
+        dim = snap["dim"]
+        if dim["miss_during_reload"] or dim["consistency_failures"]:
+            print(
+                f"  [FAIL] {name}：维表空窗 {dim['miss_during_reload']} / "
+                f"不一致 {dim['consistency_failures']}"
+            )
+            ok = False
+        elif dim["provenance_failures"]:
+            print(f"  [FAIL] {name}：{len(dim['provenance_failures'])} 行版本溯源失败")
+            ok = False
+        elif not dim["active_version"]:
+            print(f"  [FAIL] {name}：没有活动维表版本")
+            ok = False
+    if all(
+        not r[1]["dim"]["provenance_failures"] and r[1]["dim"]["active_version"]
+        for r in rows
+    ):
+        versions = {v for r in rows for v in r[1]["dim"]["row_versions"]}
+        checked = sum(r[1]["dim"]["provenance_checked"] for r in rows)
+        print(f"  [PASS] 维表原子切换 + 逐行版本溯源：{checked} 行全部可复算（{len(versions)} 个版本）")
+
+    # 7. 崩溃场景：重启后按检查点恢复维表版本
+    for name, snap, kw in rows:
+        if kw["crash_at"] is None:
+            continue
+        restore = snap["dim_restore"]
+        if restore and restore.get("restored"):
+            print(f"  [PASS] {name}：按检查点恢复维表版本 {restore['version']}")
+        else:
+            print(f"  [FAIL] {name}：检查点维表恢复失败 {restore}")
+            ok = False
 
     return 0 if ok else 1
 

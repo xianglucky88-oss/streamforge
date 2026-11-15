@@ -23,6 +23,14 @@ class Settings:
     checkpoint_interval: int = field(default_factory=lambda: int(_env("CHECKPOINT_INTERVAL", "1000")))
     # 维表全量 reload 的间隔（秒）。
     dim_reload_seconds: int = field(default_factory=lambda: int(_env("DIM_RELOAD_SECONDS", "600")))
+    # 维表版本的内存预算（字节）。旧版本 + 候选版本之和超过它时拒绝发布。
+    dim_max_bytes: int = field(
+        default_factory=lambda: int(_env("DIM_MAX_BYTES", str(512 * 1024 * 1024)))
+    )
+    # 保留的维表版本数（1 = 只留活动版本，2 = 额外留一个可回退的上一版本）。
+    dim_retain_versions: int = field(
+        default_factory=lambda: max(1, min(2, int(_env("DIM_RETAIN_VERSIONS", "2"))))
+    )
     # 状态 TTL（小时）。0 表示不设 TTL。
     state_ttl_hours: int = field(default_factory=lambda: int(_env("STATE_TTL_HOURS", "0")))
     # 是否启用两阶段提交。默认关闭。

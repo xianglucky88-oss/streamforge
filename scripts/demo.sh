@@ -37,7 +37,7 @@ say "6. 小文件（BATCH_SIZE=50）"
 rm -rf /tmp/sf-small
 SINK_ROOT=/tmp/sf-small BATCH_SIZE=50 python3 -m streamforge verify --input "$EV" --max-files 20 || true
 
-say "7. 维表 reload 空窗"
-SINK_ROOT=/tmp/sf-dim python3 -m streamforge dim-reload --n 2000
+say "7. 维表版本切换（加载期间查询始终看到完整版本）"
+SINK_ROOT=/tmp/sf-dim python3 -m streamforge dim-reload --n 2000 --delay-ms 20
 
 echo

@@ -34,6 +34,29 @@ object JsonCodec {
     )
   }
 
+  /** 维表快照消息。
+    *
+    * 普通行：{"gen":"dim-000001-ab12cd34ef56","shop_id":...}
+    * 结束标记：{"gen":"dim-000001-ab12cd34ef56","_end":true,
+    *            "expect_rows":"40","expect_digest":"ab12..."}
+    *
+    * `_end` 是快照提交点：只有它到达并通过校验后，下游才会切换 active 版本。
+    */
+  def decodeDimMessage(json: String): DimMessage = {
+    val m = fields(json)
+    val gen = m.getOrElse("gen", "")
+    if (m.get("_end").exists(v => v == "true" || v == "1")) {
+      DimMessage(
+        gen = gen,
+        end = true,
+        expectRows = m.get("expect_rows").map(_.toLong).getOrElse(-1L),
+        expectDigest = m.getOrElse("expect_digest", "")
+      )
+    } else {
+      DimMessage(gen = gen, row = decodeDim(json))
+    }
+  }
+
   /** 只处理"平铺、值为字符串或数字"的 JSON 对象。
     *
     * 这够用于本仓库的示例数据；嵌套对象与转义不处理。

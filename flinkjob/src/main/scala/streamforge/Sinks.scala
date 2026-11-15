@@ -43,10 +43,9 @@ class JsonToOrderEvent extends MapFunction[String, OrderEvent] {
     JsonCodec.decodeOrder(json)
 }
 
-/** JSON -> DimRow。 */
-class JsonToDimRow extends MapFunction[String, DimRow] {
-  override def map(json: String): DimRow =
-    JsonCodec.decodeDim(json)
+/** JSON -> DimMessage。 */
+class JsonToDimMessage extends MapFunction[String, DimMessage] {
+  override def map(json: String): DimMessage = JsonCodec.decodeDimMessage(json)
 }
 
 object IcebergSinks {
