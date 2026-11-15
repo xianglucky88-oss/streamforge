@@ -31,6 +31,19 @@ class Settings:
     processing_time: bool = field(default_factory=lambda: _env("PROCESSING_TIME", "1") == "1")
     # 小文件合并阈值（每个批次的最大事件数）。
     batch_size: int = field(default_factory=lambda: int(_env("BATCH_SIZE", "200000")))
+    # 对象存储延迟可见模拟：写入后经过多少个可见性时钟才对 list/get 可见。
+    # 0 = 立即可见；调大用于在本地复现 S3 list-bucket 的延迟一致性。
+    visibility_lag_ticks: int = field(default_factory=lambda: int(_env("VISIBILITY_LAG_TICKS", "0")))
+    # 可见性 / settle 窗口的最大重试轮数。
+    visibility_attempts: int = field(default_factory=lambda: int(_env("VISIBILITY_ATTEMPTS", "10")))
+    # 恢复锁租约（秒）：租约过期后新协调器可接管并使 epoch +1。
+    recovery_lease_seconds: float = field(
+        default_factory=lambda: float(_env("RECOVERY_LEASE_SECONDS", "30"))
+    )
+    # GC 宽限（墙钟秒）：事务在 journal 有结论后至少保留多久才允许物理删除。
+    reconcile_grace_seconds: float = field(
+        default_factory=lambda: float(_env("RECONCILE_GRACE_SECONDS", "3600"))
+    )
 
     def ensure(self) -> None:
         self.sink_root.mkdir(parents=True, exist_ok=True)

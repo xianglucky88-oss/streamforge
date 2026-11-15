@@ -132,6 +132,44 @@ def cmd_verify(args) -> int:
     return 0 if all(c["ok"] for c in checks) else 1
 
 
+def cmd_recover(args) -> int:
+    """对已有 warehouse 跑一次启动对账，打印三分类结论与状态视图。"""
+    from .commit import CommitCoordinator, LocalObjectStore
+
+    warehouse = Path(args.root) if args.root else settings.sink_root
+    root = warehouse / "orders"
+    if not root.exists():
+        print(json.dumps({"error": f"no orders directory under {warehouse}"}, ensure_ascii=False))
+        return 1
+    store = LocalObjectStore(root, visibility_lag_ticks=args.visibility_lag)
+    coordinator = CommitCoordinator(store, visibility_attempts=args.attempts)
+
+    last_cp = None
+    ck = warehouse / "_checkpoints"
+    files = sorted(ck.glob("chk-*.json")) if ck.exists() else []
+    for path in reversed(files):
+        try:
+            meta = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if meta.get("committed"):
+            last_cp = int(meta.get("next_batch_id", meta.get("batch_id", 0)))
+            break
+
+    report = coordinator.recover(last_checkpoint_batch=last_cp)
+    out = {
+        "last_checkpoint_batch": last_cp,
+        "report": report.to_dict(),
+        "visible_batches": coordinator.visible_batch_ids(),
+        "state_view": coordinator.state_view(),
+        "stats": coordinator.stats.to_dict(),
+    }
+    if args.reconcile:
+        out["reconcile"] = coordinator.reconcile(grace_seconds=args.grace_seconds)
+    print(json.dumps(out, ensure_ascii=False, indent=2))
+    return 0
+
+
 def cmd_dim_reload(args) -> int:
     """演示维表全量 reload 的过程。
 
@@ -203,6 +241,14 @@ def main(argv: list[str] | None = None) -> int:
     d.add_argument("--n", type=int, default=2000)
     d.add_argument("--seed", type=int, default=20261112)
     d.set_defaults(func=cmd_dim_reload)
+
+    rc = sub.add_parser("recover", help="对已有 warehouse 执行原子提交恢复对账")
+    rc.add_argument("--root", default=None, help="warehouse 根目录（默认取 SINK_ROOT）")
+    rc.add_argument("--visibility-lag", type=int, default=0, dest="visibility_lag")
+    rc.add_argument("--attempts", type=int, default=10)
+    rc.add_argument("--reconcile", action="store_true", help="对账后执行 GC")
+    rc.add_argument("--grace-seconds", type=float, default=3600.0, dest="grace_seconds")
+    rc.set_defaults(func=cmd_recover)
 
     args = ap.parse_args(argv)
     return args.func(args)

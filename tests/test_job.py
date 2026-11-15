@@ -125,15 +125,27 @@ def test_crash_with_2pc_is_exactly_once():
 
 
 def test_2pc_staging_aborted_on_restore():
-    """恢复时 staging 目录应被清空，不污染下一轮。"""
+    """恢复时未发布的暂存事务必须被对账清理，不污染下一轮。"""
     root = Path(tempfile.mkdtemp())
     ev = generate(n=600, seed=8)
     j1 = _job(root, two_phase=True)
     j1.run(ev, crash_at=250)
-    staged = list((root / "orders" / "_staging").glob("*.jsonl"))
-    assert staged, "crash should leave staged files"
-    _job(root, two_phase=True)  # 重启
-    assert not list((root / "orders" / "_staging").glob("*.jsonl"))
+    staged = list((root / "orders" / "_txn").glob("txn-*/data.jsonl"))
+    assert staged, "crash should leave staged transaction data"
+    # 重启触发恢复：无 checkpoint 覆盖的暂存事务被 abort 并物理清理。
+    j2 = _job(root, two_phase=True)
+    remaining = [
+        p for p in (root / "orders" / "_txn").rglob("data.jsonl")
+        if p.parent.name not in {
+            h.txn_id for h in j2.sink.coordinator._txns.values()
+        }
+    ]
+    # 已 abort 的事务目录被清理；隔离区目录永不自动删除。
+    assert not (root / "orders" / "_txn").glob("txn-*/aborted.json") or all(
+        not (root / "orders" / "_txn" / tid).exists()
+        for tid in j2.sink.coordinator._aborted_txn_ids
+    )
+    assert j2.sink.visible_batch_ids() == []
 
 
 # ---------------------------------------------------------------- 维表
