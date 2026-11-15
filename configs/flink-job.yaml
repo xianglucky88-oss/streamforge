@@ -47,5 +47,28 @@ side_output:
     path: s3a://lake/side/late_events
     format: jsonl
 
+# 毒消息隔离与死信队列。
+# 反序列化失败 / 未知 schema 版本 / 契约违例的消息不进主流，统一落 DLQ；
+# 毒丸指纹随 checkpoint 持久化，重启重投递命中即跳过，不无限失败。
+dead_letter:
+  enabled: true
+  topic: order_events_dlq
+  format: jsonl
+  # DLQ 下游不可用时的本地溢出目录，恢复后由 drain 补投。
+  spill_path: s3a://lake/side/dlq_spill
+  poison_ledger:
+    state_backend: rocksdb
+    # 毒丸台账条目保留期（天），仅用于控制状态规模，不影响隔离语义。
+  retained_fields:
+    - raw_payload        # 原始负载（截断也留原文），足以复现问题
+    - topic
+    - partition
+    - offset             # 原始标识三元组
+    - failure_category   # 失败类别
+    - schema_version     # 版本信息
+    - failed_at          # 处理时间
+    - fingerprint
+    - attempt
+
 dim:
   reload_strategy: full-overwrite
